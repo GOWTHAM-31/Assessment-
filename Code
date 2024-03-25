@@ -1,0 +1,86 @@
+# File: app.py
+from flask import Flask, request, jsonify
+import requests
+from datetime import datetime, timedelta
+
+app = Flask(__name__)
+
+# Mock database for storing events
+events = []
+
+# External API endpoints
+WEATHER_API_URL = "https://gg-backend-assignment.azurewebsites.net/api/Weather"
+DISTANCE_API_URL = "https://gg-backend-assignment.azurewebsites.net/api/Distance"
+WEATHER_API_KEY = "your_weather_api_key"
+DISTANCE_API_KEY = "your_distance_api_key"
+
+# Data creation API endpoint
+@app.route('/events/create', methods=['POST'])
+def create_event():
+    event_data = request.json
+    events.append(event_data)
+    return jsonify({"message": "Event created successfully"}), 201
+
+# Event Finder API endpoint
+@app.route('/events/find', methods=['GET'])
+def find_events():
+    latitude = float(request.args.get('latitude'))
+    longitude = float(request.args.get('longitude'))
+    search_date = datetime.strptime(request.args.get('date'), '%Y-%m-%d')
+
+    found_events = []
+
+    for event in events:
+        event_date = datetime.strptime(event['date'], '%Y-%m-%d')
+        if event_date >= search_date and event_date <= search_date + timedelta(days=14):
+            weather = get_weather(event['city_name'], event['date'])
+            distance = get_distance(latitude, longitude, event['latitude'], event['longitude'])
+            found_event = {
+                "event_name": event['event_name'],
+                "city_name": event['city_name'],
+                "date": event['date'],
+                "weather": weather,
+                "distance_km": distance
+            }
+            found_events.append(found_event)
+
+    # Sort events by date
+    found_events = sorted(found_events, key=lambda x: datetime.strptime(x['date'], '%Y-%m-%d'))
+
+    # Paginate results
+    page = int(request.args.get('page', 1))
+    page_size = int(request.args.get('pageSize', 10))
+    total_events = len(found_events)
+    total_pages = -(-total_events // page_size)  # Ceiling division
+
+    start_index = (page - 1) * page_size
+    end_index = start_index + page_size
+
+    return jsonify({
+        "events": found_events[start_index:end_index],
+        "page": page,
+        "pageSize": page_size,
+        "totalEvents": total_events,
+        "totalPages": total_pages
+    })
+
+# Function to get weather from external API
+def get_weather(city_name, date):
+    # Make request to weather API
+    response = requests.get(f"{WEATHER_API_URL}?code={WEATHER_API_KEY}&city={city_name}&date={date}")
+    if response.status_code == 200:
+        return response.json()['weather']
+    else:
+        return "Weather information unavailable"
+
+# Function to calculate distance from external API
+def get_distance(lat1, lon1, lat2, lon2):
+    # Make request to distance API
+    response = requests.get(f"{DISTANCE_API_URL}?code={DISTANCE_API_KEY}&latitude1={lat1}&longitude1={lon1}&latitude2={lat2}&longitude2={lon2}")
+    if response.status_code == 200:
+        return response.json()['distance_km']
+    else:
+        return "Distance information unavailable"
+
+if __name__ == '__main__':
+    app.run(debug=True)
